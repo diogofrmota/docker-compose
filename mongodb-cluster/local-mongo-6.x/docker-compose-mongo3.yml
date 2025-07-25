@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  mongo-3:
+    container_name: 'mongo-3-container'
+    image: 'mongo:6.0.20' #Running Mongo 6.X image
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017", "--keyFile", "/shared3/keyfile.key"] #Starts as part of a replica set and listens for connections from other nodes
+    ports:
+      - "27019:27017"
+    networks:
+      - mongo-cluster
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME} #.env file
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD} #.env file
+    volumes:
+      - '/home/diogo/mongodb/data:/shared3' #Shared volume to store keyfile and Init Script
+    env_file:
+      - /home/diogo/mongodb/data/.env
+
+networks:
+  mongo-cluster:
+    name: mongo-cluster

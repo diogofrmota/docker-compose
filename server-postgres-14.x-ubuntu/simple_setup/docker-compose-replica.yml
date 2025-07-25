@@ -1,0 +1,86 @@
+services:
+  postgresql-replica:
+    hostname: postgres-replica
+    extra_hosts:
+      - "postgres-primary:OMITTED"
+    image: ${POSTGRES_IMAGE_REPOSITORY}:${POSTGRES_IMAGE_TAG}
+    container_name: postgresql-replica
+    restart: unless-stopped
+    ports:
+      - "5432:5432" # Expose port 5432
+    env_file:
+      - .env
+    environment:
+      - POSTGRESQL_USERNAME=${POSTGRESQL_USERNAME}
+      - POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}
+      - POSTGRESQL_DATABASE=${POSTGRESQL_DATABASE}
+      - REPMGR_PASSWORD=${REPMGR_PASSWORD}
+      - REPMGR_PARTNER_NODES=${REPMGR_PARTNER_NODES}
+      - POSTGRESQL_POSTGRES_CONF_MAX_CONNECTIONS=200
+      - POSTGRESQL_POSTGRES_CONF_HOT_STANDBY=on
+      
+      # Repmgr Settings
+      - REPMGR_NODE_NAME=${REPMGR_NODE_NAME_REPLICA}
+      - REPMGR_PRIMARY_HOST=postgres-primary                                     # Explicit primary host
+      - REPMGR_ROLE=standby                                                      # Role as standby
+      - REPMGRD_ENABLED=yes
+      - REPMGR_NODE_ID=2
+      - REPMGR_NODE_NETWORK_NAME=replica-1
+      - REPMGR_CONNECT_TIMEOUT=5
+      - REPMGR_RECONNECT_ATTEMPTS=3
+      - REPMGR_RECONNECT_INTERVAL=5
+
+      # PostgreSQL SSL + Replication
+      - POSTGRESQL_POSTGRES_CONF_WAL_LEVEL=replica
+      - POSTGRESQL_POSTGRES_CONF_MAX_WAL_SENDERS=10
+      - POSTGRESQL_POSTGRES_CONF_SSL_MODE=verify-full
+      - POSTGRESQL_POSTGRES_CONF_SSL=on
+      - POSTGRESQL_POSTGRES_CONF_SSL_CERT_FILE=/etc/ssl/certs/server-replica.crt  # Replica cert
+      - POSTGRESQL_POSTGRES_CONF_SSL_KEY_FILE=/etc/ssl/private/server-replica.key # Replica key
+      - POSTGRESQL_POSTGRES_CONF_SSL_CA_FILE=/etc/ssl/certs/ca.crt                # CA cert
+      - POSTGRESQL_POSTGRES_CONF_PGHBA=hostssl all all all md5 clientcert=1       # Require client certs
+      - POSTGRESQL_LOG_TIMEZONE=UTC
+
+    volumes:
+      - /mnt/pgdata:/bitnami/postgresql
+      - ${INSTALL_PATH}/postgres-cluster/ssl/ca.crt:/etc/ssl/certs/ca.crt
+      - ${INSTALL_PATH}/postgres-cluster/ssl/server-replica.crt:/etc/ssl/certs/server-replica.crt
+      - ${INSTALL_PATH}/postgres-cluster/ssl/server-replica.key:/etc/ssl/private/server-replica.key
+      - ${SSL_PATH}/client.crt:/etc/ssl/certs/client.crt
+    networks:
+      - postgres_cluster_network
+
+  postgres-backup:
+    image: ${POSTGRES_BACKUP_IMAGE_REPOSITORY}:${POSTGRES_BACKUP_IMAGE_TAG}
+    container_name: postgres-backup
+    restart: unless-stopped
+    user: "1001:1001"
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=localhost
+      - POSTGRES_DB=${POSTGRESQL_DATABASE}
+      - POSTGRES_USER=${POSTGRESQL_USERNAME}
+      - POSTGRES_PASSWORD=${POSTGRESQL_PASSWORD}
+      - POSTGRES_EXTRA_OPTS=-Z1 --schema=public --blobs                          # Compression
+      - SCHEDULE=${POSTGRES_BACKUP_SCHEDULE}                                     # Cron-like schedule
+      - BACKUP_ON_START=TRUE                                                     # Take immediate backup on startup
+      - BACKUP_KEEP_DAYS=7                                                       # Retention policy
+      - BACKUP_KEEP_WEEKS=1
+      - BACKUP_KEEP_MONTHS=1
+      - HEALTHCHECK_PORT=8080
+    volumes:
+      - /mnt/pgdata/backups:/backups                                             # Store backups in a persistent directory (owned by 1001:1001)
+    depends_on:
+      - postgresql-replica                                                       # Start after replica
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRESQL_USERNAME} -d ${POSTGRESQL_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - postgres_cluster_network
+
+networks:
+  postgres_cluster_network:
+    driver: bridge

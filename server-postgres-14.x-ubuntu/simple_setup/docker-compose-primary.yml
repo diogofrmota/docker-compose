@@ -1,0 +1,60 @@
+services:
+  postgresql-primary:
+    hostname: postgres-primary
+    extra_hosts:
+      - "postgres-replica:OMITTED"
+    image: ${POSTGRES_IMAGE_REPOSITORY}:${POSTGRES_IMAGE_TAG}
+    container_name: postgresql-primary
+    restart: unless-stopped                                                       # Runs the container using the host machine’s network. Primary database in a different machine than Replica
+    ports:
+      - "5432:5432" # Expose port 5432
+    env_file:
+      - .env
+    command: >
+      bash -c "if ! getent passwd 1001; then echo 'postgres:x:1001:1001:Postgres User:/nonexistent:/bin/false' >> /etc/passwd; fi &&
+      exec /opt/bitnami/scripts/postgresql/run.sh"
+    environment:
+      - POSTGRESQL_USERNAME=${POSTGRESQL_USERNAME}
+      - POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}
+      - POSTGRESQL_DATABASE=${POSTGRESQL_DATABASE}
+      - REPMGR_PASSWORD=${REPMGR_PASSWORD}
+      - REPMGR_PARTNER_NODES=postgres-primary                                     # REPMGR_PARTNER_NODES="OMITTED"
+      - POSTGRESQL_POSTGRES_CONF_MAX_CONNECTIONS=200                              # Max client connections
+      - POSTGRESQL_POSTGRES_CONF_HOT_STANDBY=on                                   # Allow read-only queries on replica
+      
+      # Repmgr Settings
+      - REPMGR_NODE_NAME=${REPMGR_NODE_NAME_PRIMARY}                              # Primary node identifier
+      - REPMGR_PRIMARY_HOST=${REPMGR_PRIMARY_HOST}                                # Self-reference for primary
+      - REPMGR_ROLE=primary                                                       # Node role
+      - REPMGRD_ENABLED=yes                                                       # Enable repmgr daemon
+      - REPMGR_NODE_ID=1
+      - REPMGR_NODE_NETWORK_NAME=primary-1
+      - REPMGR_CONNECT_TIMEOUT=5
+      - REPMGR_RECONNECT_ATTEMPTS=3
+      - REPMGR_RECONNECT_INTERVAL=5
+      - REPMGR_USE_PRIMARY=yes
+
+
+      # PostgreSQL SSL + Replication
+      - POSTGRESQL_POSTGRES_CONF_WAL_LEVEL=replica
+      - POSTGRESQL_POSTGRES_CONF_MAX_WAL_SENDERS=10
+      - POSTGRESQL_POSTGRES_CONF_SSL_MODE=verify-full                             # Enforce SSL for connections
+      - POSTGRESQL_POSTGRES_CONF_SSL=on                                           # Enable SSL
+      - POSTGRESQL_POSTGRES_CONF_SSL_CERT_FILE=/etc/ssl/certs/server-primary.crt  # SSL certificate
+      - POSTGRESQL_POSTGRES_CONF_SSL_KEY_FILE=/etc/ssl/private/server-primary.key # SSL private key
+      - POSTGRESQL_POSTGRES_CONF_SSL_CA_FILE=/etc/ssl/certs/ca.crt                # CA certificate
+      - POSTGRESQL_POSTGRES_CONF_PGHBA=hostssl all all all md5 clientcert=1       # Require client certs
+      - POSTGRESQL_LOG_TIMEZONE=UTC
+
+    volumes:
+      - /mnt/pgdata:/bitnami/postgresql                                                             # Mount encrypted volume
+      - ${INSTALL_PATH}/postgres-cluster/ssl/ca.crt:/etc/ssl/certs/ca.crt                           # CA cert
+      - ${INSTALL_PATH}/postgres-cluster/ssl/server-primary.crt:/etc/ssl/certs/server-primary.crt   # Node cert
+      - ${INSTALL_PATH}/postgres-cluster/ssl/server-primary.key:/etc/ssl/private/server-primary.key # Node key
+      - ${SSL_PATH}/client.crt:/etc/ssl/certs/client.crt                                            # Client cert
+    networks:
+      - postgres_cluster_network
+
+networks:
+  postgres_cluster_network:
+    driver: bridge

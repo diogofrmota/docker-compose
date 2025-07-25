@@ -1,0 +1,68 @@
+# docker-compose.yml for Replica (OMITTED)
+
+services:
+  postgresql-replica:
+    image: ${POSTGRES_IMAGE_REPOSITORY}:${POSTGRES_IMAGE_TAG}
+    container_name: postgresql-replica
+    hostname: postgres-replica
+    network_mode: "host"
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Repmgr and replication settings for replica
+      - REPMGR_NODE_ID=${REPMGR_NODE_ID_REPLICA}
+      - REPMGR_NODE_NAME=${REPMGR_NODE_NAME_REPLICA}
+      - REPMGR_NODE_NETWORK_NAME=${REPMGR_NODE_NETWORK_NAME_REPLICA}
+      - REPMGR_PARTNER_NODES=${REPMGR_PARTNER_NODES} 
+      - REPMGR_PRIMARY_HOST=${REPMGR_PRIMARY_HOST}
+      - REPMGR_USERNAME=${REPMGR_USERNAME}
+      - REPMGR_PASSWORD=${REPMGR_PASSWORD}
+      - REPMGR_DATABASE=${REPMGR_DATABASE}
+
+      # PostgreSQL credentials and database settings
+      - POSTGRESQL_POSTGRES_PASSWORD=${POSTGRESQL_POSTGRES_PASSWORD}
+      - POSTGRESQL_USERNAME=${POSTGRESQL_USERNAME}
+      - POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}
+      - POSTGRESQL_DATABASE=${POSTGRESQL_DATABASE}
+
+      # SSL configuration (using replica-specific certificate/key)
+      - POSTGRESQL_ENABLE_SSL=yes
+      - POSTGRESQL_SSL_CERT_FILE=/opt/bitnami/postgresql/certs/server-replica.crt
+      - POSTGRESQL_SSL_KEY_FILE=/opt/bitnami/postgresql/certs/server-replica.key
+      - POSTGRESQL_SSL_CA_FILE=/opt/bitnami/postgresql/certs/ca.crt 
+    volumes:
+      - /mnt/pgdata:/bitnami/postgresql
+      - ${INSTALL_PATH}/postgres-cluster/ssl:/opt/bitnami/postgresql/certs
+      - ${INSTALL_PATH}/postgres-cluster/conf.d:/opt/bitnami/postgresql/conf.d
+  
+  postgres-backup:
+    image: ${POSTGRES_BACKUP_IMAGE_REPOSITORY}:${POSTGRES_BACKUP_IMAGE_TAG}
+    container_name: postgres-backup
+    restart: unless-stopped
+    network_mode: "host"
+    user: "1001:1001"
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=${POSTGRES_HOST_BACKUP}
+      - POSTGRES_DB=${POSTGRESQL_DATABASE}
+      - POSTGRES_USER=${POSTGRESQL_USERNAME}
+      - POSTGRES_PASSWORD=${POSTGRESQL_PASSWORD}
+      - POSTGRES_EXTRA_OPTS=-Z1 --schema=public --blobs                          # Compression
+      - SCHEDULE=${POSTGRES_BACKUP_SCHEDULE}                                     # Cron-like schedule
+      - BACKUP_ON_START=TRUE                                                     # Take immediate backup on startup
+      - BACKUP_KEEP_DAYS=7                                                       # Retention policy
+      - BACKUP_KEEP_WEEKS=1
+      - BACKUP_KEEP_MONTHS=1
+      - HEALTHCHECK_PORT=8080
+    volumes:
+      - /mnt/pgdata/backups:/backups                                             # Store backups in a persistent directory (owned by 1001:1001)
+    depends_on:
+      - postgresql-replica                                                       # Start after replica
+    command: sh -c "sleep 30 && /init.sh"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h $${POSTGRES_HOST} -U $${POSTGRESQL_USERNAME} -d $${POSTGRESQL_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

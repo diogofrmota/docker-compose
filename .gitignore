@@ -1,0 +1,12 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Docker
+docker-compose.override.yml
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store

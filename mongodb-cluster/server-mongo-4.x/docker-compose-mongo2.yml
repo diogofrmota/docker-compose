@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  mongo-2:
+    container_name: 'mongo-2-container'
+    image: 'mongo:4.0' #Running Mongo 4.X image
+    command: ["--replSet", "rs0", "--bind_ip", "localhost,OMITTED", "--port", "27017", "--keyFile", "/data/keyfile.key"] #Starts as part of a replica set and listens for connections from other nodes
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME} #.env file
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD} #.env file
+    volumes:
+      - 'mongo2data:/data/db' #Default directory to store data
+      - 'mongo2config:/data/configdb' #Used to store metadata
+      - '/data:/data' #Shared volume to store keyfile and Init Script
+    env_file:
+      - /data/.env
+    # user: 999:999
+
+volumes:
+  mongo2data:
+  mongo2config:
